@@ -1,0 +1,8 @@
+# GitHub（公開）に送るのはアプリ本体の5ファイルだけ。地番リスト・写真・説明書は送らない
+*
+!index.html
+!sw.js
+!manifest.json
+!icon-180.png
+!icon-512.png
+!.gitignore

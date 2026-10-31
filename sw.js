@@ -1,6 +1,6 @@
 // 電波がなくても開けるように、アプリのファイルを携帯に保存しておく
 // アプリを直したら VER を上げる（次に電波のある所で開いたときに入れ替わる）
-const VER = "genchi-v1";
+const VER = "genchi-v3";  // v2: 管理番号の追加 / v3: 書き出しを管理番号フォルダに
 const FILES = ["./", "index.html", "manifest.json", "icon-180.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

@@ -74,6 +74,15 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 .wbtn{display:block;width:100%;padding:12px;border:0;border-radius:10px;background:var(--btn);color:#fff;font-size:16px;font-weight:700;text-align:center}
 .wbtn.gray{background:#eee;color:#333}
 .row{display:flex;justify-content:space-between;align-items:center;font-size:15px}
+/* 追加ダイアログ */
+#addDlg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:flex-end;justify-content:center;z-index:8}
+#addDlg.on{display:flex}
+#addDlg .sheet{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px 16px calc(env(safe-area-inset-bottom) + 16px)}
+#addDlg h2{font-size:17px;margin:0 0 12px}
+#addDlg label.f{display:block;font-size:13px;color:var(--sub);margin:10px 0 4px}
+#addDlg input[type=text],#addDlg input[type=number]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:16px}
+#addDlg .btns{display:flex;gap:8px;margin-top:16px}
+#addDlg .btns button{flex:1}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:9px 16px;border-radius:18px;font-size:14px;display:none;z-index:10;max-width:85%;text-align:center}
 </style>
 </head>
@@ -81,7 +90,7 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 
 <!-- トーク一覧 -->
 <section class="screen on" id="home">
-  <header><h1>現地メモ</h1><button id="toSet">設定</button></header>
+  <header><h1>現地メモ</h1><button id="toAdd" style="font-size:26px;line-height:1">＋</button><button id="toSet">設定</button></header>
   <div class="search"><input id="q" type="search" placeholder="管理番号・地番で検索"></div>
   <div class="tabs" id="tabs"></div>
   <div id="list"></div>
@@ -122,6 +131,13 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
   </div>
 </section>
 
+<div id="addDlg"><div class="sheet">
+  <h2>管理番号を追加</h2>
+  <label class="f">管理番号</label><input id="aNo" type="number" inputmode="numeric">
+  <label class="f">所在地番（地番が分からなければ空欄でもOK）</label><input id="aAd" type="text">
+  <div class="row" style="margin-top:12px">今いる場所を記録<input type="checkbox" id="aGps" checked style="width:24px;height:24px"></div>
+  <div class="btns"><button class="wbtn gray" id="aCancel">やめる</button><button class="wbtn" id="aOk">追加</button></div>
+</div></div>
 <div id="viewer"><img alt=""><button>閉じる</button></div>
 <div id="toast"></div>
 
@@ -213,8 +229,8 @@ async function renderMsgs() {
   $("#msgs").scrollTop = 1e9;
   $("#msgs").querySelectorAll("img").forEach((i) => i.onload = () => $("#msgs").scrollTop = 1e9);
 }
-function here() {
-  if (!$("#gps").checked || !navigator.geolocation) return Promise.resolve({});
+function here(force) {
+  if ((!force && !$("#gps").checked) || !navigator.geolocation) return Promise.resolve({});
   return new Promise((ok) => navigator.geolocation.getCurrentPosition(
     (p) => ok({ lat: p.coords.latitude, lon: p.coords.longitude }), () => ok({}), { enableHighAccuracy: true, timeout: 8000, maximumAge: 30000 }));
 }
@@ -268,6 +284,29 @@ async function delMsg(id) {
   await put("rooms", cur); renderMsgs();
 }
 $("#viewer button").onclick = () => $("#viewer").classList.remove("on");
+
+// ===== 管理番号の追加（現地で見つけた筆など）=====
+$("#toAdd").onclick = async () => {
+  const rooms = await getAll("rooms");
+  const nums = rooms.map((r) => +r.no).filter((n) => n > 0);
+  $("#aNo").value = nums.length ? Math.max(...nums) + 1 : "";
+  const last = rooms.filter((r) => r.addr).pop();  // 住所の頭（〜大字＋空白）を前の筆からもらう
+  $("#aAd").value = last ? String(last.addr).replace(/[^\s]*$/, "") : "";
+  $("#addDlg").classList.add("on");
+};
+$("#aCancel").onclick = () => $("#addDlg").classList.remove("on");
+$("#aOk").onclick = async () => {
+  const no = String($("#aNo").value).trim();
+  if (!no) { toast("管理番号を入れてください"); return; }
+  if ((await getAll("rooms")).some((r) => String(r.no) === no)) { toast(`${no} はもうあります`); return; }
+  $("#aOk").disabled = true;
+  const p = $("#aGps").checked ? await here(true) : {};
+  if ($("#aGps").checked && !p.lat) toast("位置が取れませんでした（あとでメモに書いてください）");
+  await put("rooms", { no, addr: $("#aAd").value.trim() || "（地番未記入）", n: 0, t: 0, last: "現地で追加", added: true, lat: p.lat, lon: p.lon });
+  $("#aOk").disabled = false;
+  $("#addDlg").classList.remove("on");
+  openRoom(no);
+};
 
 // ===== 設定 =====
 $("#toSet").onclick = () => { show("set"); usage(); };
@@ -344,18 +383,36 @@ $("#exp").onclick = async () => {
   const rooms = (await getAll("rooms")).sort((a, b) => (+a.no || 0) - (+b.no || 0));
   const ms = (await getAll("msgs")).sort((a, b) => a.t - b.t);
   const addr = Object.fromEntries(rooms.map((r) => [String(r.no), r.addr]));
-  const enc = new TextEncoder(), files = [], cnt = {};
+  const enc = new TextEncoder(), files = [], cnt = {}, txt = {};
+  const d = new Date(), stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
+  const top = "";  // zip の一番上に管理番号フォルダを置く（何回分でも同じ場所に展開すれば管理番号ごとにまとまる）
+  // 管理番号ごとのフォルダ名（例 1190_990-4）。ファイル名に使えない文字は _ にする
+  const dir = (no) => top + `${no}_${String(addr[no] || "").split(/\s/).pop()}`.replace(/[\\/:*?"<>|]/g, "_") + "/";
+  const tstamp = (t) => { const x = new Date(t); return `${x.getFullYear()}${pad(x.getMonth() + 1)}${pad(x.getDate())}_${pad(x.getHours())}${pad(x.getMinutes())}`; };
   const L = [["管理番号", "所在地番", "日時", "種類", "内容", "写真ファイル", "緯度", "経度"]];
   for (const m of ms) {
     let fn = "";
-    if (m.kind === "photo") { cnt[m.no] = (cnt[m.no] || 0) + 1; fn = `写真/${m.no}_${pad(cnt[m.no])}.jpg`; files.push({ name: fn, data: new Uint8Array(await m.blob.arrayBuffer()) }); }
+    const g = m.lat ? `（位置 ${m.lat.toFixed(6)},${m.lon.toFixed(6)}）` : "";
+    if (m.kind === "photo") {
+      cnt[m.no] = (cnt[m.no] || 0) + 1;
+      fn = `${tstamp(m.t)}_${pad(cnt[m.no])}.jpg`;  // 撮影日時入り → 別の日の書き出しと重ならない
+      files.push({ name: dir(m.no) + fn, data: new Uint8Array(await m.blob.arrayBuffer()) });
+    }
+    (txt[m.no] = txt[m.no] || []).push(`${ymd(m.t)} ${hm(m.t)}　` +
+      (m.kind === "photo" ? `[写真] ${fn}` : m.kind === "result" ? `[結果] ${m.text}` : m.text) + g);
     L.push([m.no, addr[m.no], `${ymd(m.t)} ${hm(m.t)}`, { text: "メモ", photo: "写真", result: "結果" }[m.kind], m.kind === "photo" ? "" : m.text, fn, m.lat ?? "", m.lon ?? ""]);
   }
-  const R = [["管理番号", "所在地番", "確認結果", "メモ（まとめ）", "写真枚数"]];
-  for (const r of rooms) R.push([r.no, r.addr, r.result || "", ms.filter((m) => m.no === r.no && m.kind === "text").map((m) => m.text).join(" / "), cnt[r.no] || 0]);
+  // メモ.txt は書き出した日時入りの名前（同じフォルダに展開しても上書きしない）
+  for (const r of rooms) if (txt[r.no]) {
+    const head = `管理番号 ${r.no}\r\n${r.addr}\r\n確認結果 ${r.result || "未記入"}${r.added ? "\r\n（現地で追加）" : ""}\r\n\r\n`;
+    files.push({ name: dir(r.no) + `メモ_${stamp}.txt`, data: enc.encode("﻿" + head + txt[r.no].join("\r\n") + "\r\n") });
+  }
+  const R = [["管理番号", "所在地番", "確認結果", "メモ（まとめ）", "写真枚数", "現地で追加", "緯度", "経度"]];
+  for (const r of rooms) R.push([r.no, r.addr, r.result || "", ms.filter((m) => m.no === r.no && m.kind === "text").map((m) => m.text).join(" / "), cnt[r.no] || 0,
+    r.added ? "追加" : "", r.added ? r.lat ?? "" : "", r.added ? r.lon ?? "" : ""]);
   const bom = (s) => enc.encode("﻿" + s.map(csvLine).join("\r\n") + "\r\n");
-  files.unshift({ name: "結果.csv", data: bom(R) }, { name: "メモ.csv", data: bom(L) });
-  const d = new Date(), name = `現地メモ_${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}.zip`;
+  files.unshift({ name: top + `結果_${stamp}.csv`, data: bom(R) }, { name: top + `メモ_${stamp}.csv`, data: bom(L) });
+  const name = `現地メモ_${stamp}.zip`;
   const blob = zip(files), file = new File([blob], name, { type: "application/zip" });
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === "AbortError") return; }
