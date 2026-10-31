@@ -28,6 +28,7 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 .tabs button{border:1px solid var(--line);background:#fff;border-radius:16px;padding:5px 12px;font-size:14px;white-space:nowrap}
 .tabs button.on{background:#111;color:#fff;border-color:#111}
 #list{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.room,.msg,.sys{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .room{display:flex;align-items:center;gap:12px;padding:10px 12px;border-bottom:1px solid #f3f3f3}
 .av{width:50px;height:50px;border-radius:50%;background:#dfe7f2;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex:none;position:relative;background-size:cover;background-position:center;color:#345}
 .av.ph{color:#fff;text-shadow:0 0 3px #000}
@@ -127,7 +128,8 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
     <div class="card"><h2>使い方</h2>
       <p>・最初に電波のある所でこのページを開き、Safariの共有ボタン →「ホーム画面に追加」。以後はホーム画面のアイコンから開くと電波なしで使えます。<br>
       ・データはこの携帯の中にだけあります。機種変更・アプリ削除の前に必ず書き出してください。<br>
-      ・メッセージを長押しすると削除できます。</p></div>
+      ・メッセージを長押しすると削除できます。<br>
+      ・一覧で管理番号を長押しすると、その管理番号ごと削除できます（写真・メモも消えます）。</p></div>
   </div>
 </section>
 
@@ -204,7 +206,20 @@ async function renderList() {
 }
 $("#tabs").onclick = (e) => { if (e.target.dataset.f) { filter = e.target.dataset.f; renderList(); } };
 $("#q").oninput = renderList;
-$("#list").onclick = (e) => { const r = e.target.closest(".room"); if (r) openRoom(r.dataset.no); };
+// タップで開く、長押しで管理番号ごと削除
+let rlp, rlpDone = false;
+$("#list").onclick = (e) => { if (rlpDone) { rlpDone = false; return; } const r = e.target.closest(".room"); if (r) openRoom(r.dataset.no); };
+$("#list").addEventListener("touchstart", (e) => { const r = e.target.closest(".room"); if (r) rlp = setTimeout(() => { rlpDone = true; delRoom(r.dataset.no); }, 650); }, { passive: true });
+["touchend", "touchmove"].forEach((ev) => $("#list").addEventListener(ev, () => clearTimeout(rlp), { passive: true }));
+$("#list").addEventListener("contextmenu", (e) => { const r = e.target.closest(".room"); if (r) { e.preventDefault(); delRoom(r.dataset.no); } });
+async function delRoom(no) {
+  const ms = await msgsOf(no), p = ms.filter((m) => m.kind === "photo").length, t = ms.filter((m) => m.kind === "text").length;
+  if (!confirm(`管理番号 ${no} を一覧から消しますか？`)) return;
+  if (p + t && !confirm(`写真 ${p}枚・メモ ${t}件も消えて、元に戻せません。\n残したい場合は先に「設定」→「書き出す」をしてください。\n本当に消しますか？`)) return;
+  for (const m of ms) await del("msgs", m.id);
+  await del("rooms", no);
+  toast(`${no} を消しました`); renderList();
+}
 
 // ===== トーク =====
 async function openRoom(no) {
