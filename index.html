@@ -99,7 +99,7 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 
 <!-- トーク -->
 <section class="screen" id="chat">
-  <header><button class="back" id="back">‹</button><h1 id="title"></h1><button id="mapBtn">地図</button></header>
+  <header><button class="back" id="back">‹</button><h1 id="title"></h1><button id="mapBtn">地図</button><button id="delBtn" style="color:var(--batsu)">削除</button></header>
   <div class="status"><button class="m" data-r="○">○</button><button class="s" data-r="△">△</button><button class="b" data-r="✕">✕</button></div>
   <div id="msgs"></div>
   <div class="bar">
@@ -129,7 +129,8 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
       <p>・最初に電波のある所でこのページを開き、Safariの共有ボタン →「ホーム画面に追加」。以後はホーム画面のアイコンから開くと電波なしで使えます。<br>
       ・データはこの携帯の中にだけあります。機種変更・アプリ削除の前に必ず書き出してください。<br>
       ・メッセージを長押しすると削除できます。<br>
-      ・一覧で管理番号を長押しすると、その管理番号ごと削除できます（写真・メモも消えます）。</p></div>
+      ・管理番号ごと消すときは、トーク画面右上の「削除」か、一覧で長押し（写真・メモも消えます）。</p></div>
+    <p style="text-align:center;color:var(--sub);font-size:12px">現地メモ 版 v5</p>
   </div>
 </section>
 
@@ -209,8 +210,15 @@ $("#q").oninput = renderList;
 // タップで開く、長押しで管理番号ごと削除
 let rlp, rlpDone = false;
 $("#list").onclick = (e) => { if (rlpDone) { rlpDone = false; return; } const r = e.target.closest(".room"); if (r) openRoom(r.dataset.no); };
-$("#list").addEventListener("touchstart", (e) => { const r = e.target.closest(".room"); if (r) rlp = setTimeout(() => { rlpDone = true; delRoom(r.dataset.no); }, 650); }, { passive: true });
-["touchend", "touchmove"].forEach((ev) => $("#list").addEventListener(ev, () => clearTimeout(rlp), { passive: true }));
+// iPhone は指が少し動いただけで touchmove が来るので、10px 以上動いたときだけ長押しを取り消す
+let rx = 0, ry = 0;
+$("#list").addEventListener("touchstart", (e) => {
+  const r = e.target.closest(".room"); if (!r) return;
+  rx = e.touches[0].clientX; ry = e.touches[0].clientY; rlpDone = false;
+  rlp = setTimeout(() => { rlpDone = true; if (navigator.vibrate) navigator.vibrate(30); delRoom(r.dataset.no); }, 600);
+}, { passive: true });
+$("#list").addEventListener("touchmove", (e) => { if (Math.hypot(e.touches[0].clientX - rx, e.touches[0].clientY - ry) > 10) clearTimeout(rlp); }, { passive: true });
+$("#list").addEventListener("touchend", () => clearTimeout(rlp), { passive: true });
 $("#list").addEventListener("contextmenu", (e) => { const r = e.target.closest(".room"); if (r) { e.preventDefault(); delRoom(r.dataset.no); } });
 async function delRoom(no) {
   const ms = await msgsOf(no), p = ms.filter((m) => m.kind === "photo").length, t = ms.filter((m) => m.kind === "text").length;
@@ -218,7 +226,8 @@ async function delRoom(no) {
   if (p + t && !confirm(`写真 ${p}枚・メモ ${t}件も消えて、元に戻せません。\n残したい場合は先に「設定」→「書き出す」をしてください。\n本当に消しますか？`)) return;
   for (const m of ms) await del("msgs", m.id);
   await del("rooms", no);
-  toast(`${no} を消しました`); renderList();
+  toast(`${no} を消しました`); show("home"); renderList();
+  return true;
 }
 
 // ===== トーク =====
@@ -282,6 +291,7 @@ document.querySelector(".status").onclick = async (e) => {
   await addMsg({ kind: "result", text: nv || "未記入" });
 };
 $("#back").onclick = () => { show("home"); renderList(); };
+$("#delBtn").onclick = () => delRoom(cur.no);
 $("#mapBtn").onclick = () => { if (navigator.onLine === false) toast("電波がないため地図は開けません"); location.href = `https://www.google.com/maps/search/?api=1&query=${cur.lat},${cur.lon}`; };
 // 写真タップで拡大、長押しで削除
 let lp;
@@ -437,7 +447,12 @@ $("#exp").onclick = async () => {
 };
 
 // ===== 起動 =====
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js");
+if ("serviceWorker" in navigator) {
+  // 新しい版が入ったら1回だけ自動で読み直す（初回の登録時は読み直さない）
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (had && !window._rl) { window._rl = 1; location.reload(); } });
+  navigator.serviceWorker.register("sw.js").then((r) => r.update()).catch(() => {});
+}
 renderList();
 </script>
 </body>
