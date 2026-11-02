@@ -1,7 +1,7 @@
 // 電波がなくても開けるように、アプリのファイルを携帯に保存しておく
 // アプリを直したら VER を上げる（index.html の「版」表示も合わせる）
 // v2: 管理番号の追加 / v3: 書き出しを管理番号フォルダに / v4: 管理番号の削除 / v5: 削除ボタン・長押し改善・更新の仕組み
-const VER = "genchi-v5";
+const VER = "genchi-v6";
 const FILES = ["./", "index.html", "manifest.json", "icon-180.png", "icon-512.png"];
 
 self.addEventListener("install", (e) => {

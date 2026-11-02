@@ -84,6 +84,13 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 #addDlg input[type=text],#addDlg input[type=number]{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:16px}
 #addDlg .btns{display:flex;gap:8px;margin-top:16px}
 #addDlg .btns button{flex:1}
+/* 地図 */
+#map .wrap{flex:1;position:relative;overflow:hidden;background:#f7f7f2;touch-action:none}
+#cv{position:absolute;inset:0;width:100%;height:100%}
+.mfoot{position:absolute;left:8px;bottom:calc(env(safe-area-inset-bottom) + 8px);font-size:10px;color:#666;background:rgba(255,255,255,.8);padding:2px 6px;border-radius:6px;pointer-events:none}
+.mbtn{position:absolute;right:12px;bottom:calc(env(safe-area-inset-bottom) + 16px);display:flex;flex-direction:column;gap:8px}
+.mbtn button{width:48px;height:48px;border-radius:50%;border:0;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.3);font-size:20px}
+.mbtn button.on{background:#1a73e8;color:#fff}
 #toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:rgba(0,0,0,.8);color:#fff;padding:9px 16px;border-radius:18px;font-size:14px;display:none;z-index:10;max-width:85%;text-align:center}
 </style>
 </head>
@@ -91,7 +98,7 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 
 <!-- トーク一覧 -->
 <section class="screen on" id="home">
-  <header><h1>現地メモ</h1><button id="toAdd" style="font-size:26px;line-height:1">＋</button><button id="toSet">設定</button></header>
+  <header><h1>現地メモ</h1><button id="toMap">地図</button><button id="toAdd" style="font-size:26px;line-height:1">＋</button><button id="toSet">設定</button></header>
   <div class="search"><input id="q" type="search" placeholder="管理番号・地番で検索"></div>
   <div class="tabs" id="tabs"></div>
   <div id="list"></div>
@@ -110,6 +117,14 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
   </div>
 </section>
 
+<!-- 地図（読み込んだ筆の形を電波なしで描く）-->
+<section class="screen" id="map">
+  <header><button class="back" id="back3">‹</button><h1 id="mTitle">地図</h1><button id="gmap">Google</button></header>
+  <div class="wrap"><canvas id="cv"></canvas>
+    <div class="mfoot">出典：法務省 登記所備付地図データ（加工して作成）・位置と形は参考</div>
+    <div class="mbtn"><button id="mFit" title="全体">⤢</button><button id="mGps" title="現在地">◎</button></div></div>
+</section>
+
 <!-- 設定 -->
 <section class="screen" id="set">
   <header><button class="back" id="back2">‹</button><h1>設定</h1></header>
@@ -117,6 +132,11 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
     <div class="card"><h2>リストを読み込む</h2>
       <p>管理番号・所在地番の入ったCSV（パソコンで作ったもの）を選びます。同じ管理番号のトークはそのまま残ります。</p>
       <label class="wbtn">CSVを選ぶ<input id="csv" type="file" accept=".csv,text/csv,text/plain" hidden></label></div>
+    <div class="card"><h2>地図を読み込む</h2>
+      <p>管理番号入りの筆の地図（パソコンで作った .geojson）を選びます。読み込めば電波なしで見られます。</p>
+      <p id="mapList">なし</p>
+      <label class="wbtn">地図ファイルを選ぶ<input id="gj" type="file" hidden></label>
+      <button class="wbtn gray" id="mapClear" style="margin-top:8px">地図を全部消す</button></div>
     <div class="card"><h2>書き出し</h2>
       <p>写真とメモをまとめたファイル（zip）を作ります。電波のある所で、Googleドライブやパソコンに送ってください。</p>
       <button class="wbtn" id="exp">書き出す</button></div>
@@ -129,8 +149,9 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
       <p>・最初に電波のある所でこのページを開き、Safariの共有ボタン →「ホーム画面に追加」。以後はホーム画面のアイコンから開くと電波なしで使えます。<br>
       ・データはこの携帯の中にだけあります。機種変更・アプリ削除の前に必ず書き出してください。<br>
       ・メッセージを長押しすると削除できます。<br>
-      ・管理番号ごと消すときは、トーク画面右上の「削除」か、一覧で長押し（写真・メモも消えます）。</p></div>
-    <p style="text-align:center;color:var(--sub);font-size:12px">現地メモ 版 v5</p>
+      ・管理番号ごと消すときは、トーク画面右上の「削除」か、一覧で長押し（写真・メモも消えます）。<br>
+      ・地図：指2本で拡大、◎で現在地、管理番号の筆をタップするとトークが開きます。</p></div>
+    <p style="text-align:center;color:var(--sub);font-size:12px">現地メモ 版 v6</p>
   </div>
 </section>
 
@@ -147,12 +168,15 @@ header button{background:none;border:0;font-size:16px;color:var(--txt);padding:6
 <script>
 // ===== 保存（IndexedDB）=====
 const DB = new Promise((ok, ng) => {
-  const r = indexedDB.open("genchi", 1);
-  r.onupgradeneeded = () => {
+  const r = indexedDB.open("genchi", 2);
+  r.onupgradeneeded = (e) => {
     const d = r.result;
-    d.createObjectStore("rooms", { keyPath: "no" });  // {no, addr, result, link, last, t, n}
-    const m = d.createObjectStore("msgs", { keyPath: "id", autoIncrement: true });  // {no, t, kind, text, blob, lat, lon}
-    m.createIndex("no", "no");
+    if (e.oldVersion < 1) {
+      d.createObjectStore("rooms", { keyPath: "no" });  // {no, addr, result, link, last, t, n}
+      const m = d.createObjectStore("msgs", { keyPath: "id", autoIncrement: true });  // {no, t, kind, text, blob, lat, lon}
+      m.createIndex("no", "no");
+    }
+    if (e.oldVersion < 2) d.createObjectStore("maps", { keyPath: "name" });  // {name, fc} 読み込んだ GeoJSON
   };
   r.onsuccess = () => ok(r.result); r.onerror = () => ng(r.error);
 });
@@ -234,7 +258,8 @@ async function delRoom(no) {
 async function openRoom(no) {
   cur = (await getAll("rooms")).find((r) => String(r.no) === String(no));
   $("#title").textContent = `${cur.no}　${String(cur.addr).split(/\s/).pop()}`;
-  $("#mapBtn").style.visibility = cur.lat ? "visible" : "hidden";
+  await loadMaps();
+  $("#mapBtn").style.visibility = cur.lat || MF.some((f) => f.no === String(cur.no)) ? "visible" : "hidden";
   show("chat"); await renderMsgs(); setStatus();
 }
 function setStatus() { document.querySelectorAll(".status button").forEach((b) => b.classList.toggle("on", b.dataset.r === cur.result)); }
@@ -290,9 +315,10 @@ document.querySelector(".status").onclick = async (e) => {
   cur.result = nv; setStatus();
   await addMsg({ kind: "result", text: nv || "未記入" });
 };
-$("#back").onclick = () => { show("home"); renderList(); };
+$("#back").onclick = () => { if (backToMap) { backToMap = false; openMap(); } else { show("home"); renderList(); } };
 $("#delBtn").onclick = () => delRoom(cur.no);
-$("#mapBtn").onclick = () => { if (navigator.onLine === false) toast("電波がないため地図は開けません"); location.href = `https://www.google.com/maps/search/?api=1&query=${cur.lat},${cur.lon}`; };
+const gmaps = (lat, lon) => { if (navigator.onLine === false) toast("電波がないため Googleマップは開けません"); location.href = `https://www.google.com/maps/search/?api=1&query=${lat},${lon}`; };
+$("#mapBtn").onclick = async () => { await loadMaps(); if (MF.some((f) => f.no === String(cur.no))) openMap(String(cur.no)); else gmaps(cur.lat, cur.lon); };
 // 写真タップで拡大、長押しで削除
 let lp;
 $("#msgs").addEventListener("click", (e) => { if (e.target.tagName === "IMG") { $("#viewer img").src = e.target.src; $("#viewer").classList.add("on"); } });
@@ -333,8 +359,144 @@ $("#aOk").onclick = async () => {
   openRoom(no);
 };
 
+// ===== 地図 =====
+// 読み込んだ筆を平面（m）に直して canvas に描く。v = {s: 1mあたりの画面px, x, y: 原点の画面位置}
+let MF = null, MO = null, sel = null, backToMap = false, me = null, watch = null;
+const v = { s: 1, x: 0, y: 0 };
+async function loadMaps() {
+  if (MF) return;
+  const ms = await getAll("maps"), fs = ms.flatMap((m) => m.fc.features || []);
+  MF = [];
+  if (!fs.length) return;
+  let a = 0, b = 0, n = 0;
+  for (const f of fs) { const c = ringsOf(f.geometry)[0]?.[0]; if (c) { a += c[1]; b += c[0]; n++; } }
+  MO = { lat: a / n, lon: b / n, k: Math.cos(a / n * Math.PI / 180) * 111320 };
+  for (const f of fs) {
+    const rs = ringsOf(f.geometry).map((r) => r.map(([lon, lat]) => xy(lat, lon)));
+    if (!rs.length) continue;
+    const xs = rs[0].map((p) => p[0]), ys = rs[0].map((p) => p[1]);
+    const p = f.properties || {};
+    MF.push({ rs, no: p["管理番号"] != null ? String(p["管理番号"]) : null, jb: p["地番"] || "", road: !!p["道"],
+      bb: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)], c: center(rs[0]) });
+  }
+  MF.sort((p, q) => (p.no ? 1 : 0) - (q.no ? 1 : 0));  // 管理番号の筆を上に描く
+}
+const ringsOf = (g) => !g ? [] : g.type === "Polygon" ? g.coordinates : g.type === "MultiPolygon" ? g.coordinates.flat() : [];
+const xy = (lat, lon) => [(lon - MO.lon) * MO.k, -(lat - MO.lat) * 110950];
+function center(r) {  // 面積の重心（文字の位置）
+  let A = 0, X = 0, Y = 0;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) { const f = r[j][0] * r[i][1] - r[i][0] * r[j][1]; A += f; X += (r[j][0] + r[i][0]) * f; Y += (r[j][1] + r[i][1]) * f; }
+  return A ? [X / 3 / A, Y / 3 / A] : r[0];
+}
+const cv = $("#cv"), ctx = cv.getContext("2d");
+let roomsBy = {};
+async function openMap(no) {
+  await loadMaps();
+  if (!MF.length) { toast("地図がありません。「設定」→「地図を読み込む」で入れてください"); return; }
+  roomsBy = Object.fromEntries((await getAll("rooms")).map((r) => [String(r.no), r]));
+  show("map"); size();
+  if (no) { sel = no; const f = MF.find((x) => x.no === no); fit([f.bb[0] - 60, f.bb[1] - 60, f.bb[2] + 60, f.bb[3] + 60]); }
+  else if (!openMap.done) fit(allBB());
+  openMap.done = true;
+  $("#mTitle").textContent = sel ? `地図　${sel}` : "地図";
+  draw();
+}
+function allBB() { const t = MF.filter((f) => f.no), u = t.length ? t : MF; return [Math.min(...u.map((f) => f.bb[0])), Math.min(...u.map((f) => f.bb[1])), Math.max(...u.map((f) => f.bb[2])), Math.max(...u.map((f) => f.bb[3]))]; }
+function size() { const d = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight; cv.width = W * d; cv.height = H * d; ctx.setTransform(d, 0, 0, d, 0, 0); }
+function fit(b) {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  v.s = Math.min(W / (b[2] - b[0]), H / (b[3] - b[1])) * 0.92;
+  v.x = W / 2 - (b[0] + b[2]) / 2 * v.s; v.y = H / 2 - (b[1] + b[3]) / 2 * v.s;
+}
+const FILL = { "○": "#b7e4b0", "△": "#ffe08a", "✕": "#f4b4b2" };
+function pathOf(f) { const p = new Path2D(); for (const r of f.rs) { r.forEach(([x, y], i) => i ? p.lineTo(x * v.s + v.x, y * v.s + v.y) : p.moveTo(x * v.s + v.x, y * v.s + v.y)); p.closePath(); } return p; }
+function draw() {
+  const W = cv.clientWidth, H = cv.clientHeight;
+  ctx.clearRect(0, 0, W, H);
+  const vis = MF.filter((f) => f.bb[2] * v.s + v.x > 0 && f.bb[0] * v.s + v.x < W && f.bb[3] * v.s + v.y > 0 && f.bb[1] * v.s + v.y < H);
+  for (const f of vis) {
+    const p = f._p = pathOf(f);
+    if (f.no) { ctx.fillStyle = FILL[roomsBy[f.no]?.result] || "#cfe2ff"; ctx.fill(p); ctx.strokeStyle = "#1f4e79"; ctx.lineWidth = f.no === sel ? 4 : 1.2; }
+    else { if (f.road) { ctx.fillStyle = "#e3e3e3"; ctx.fill(p); } ctx.strokeStyle = "#d9534f"; ctx.lineWidth = 0.6; }
+    ctx.stroke(p);
+  }
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.lineJoin = "round";
+  for (const f of vis) {
+    const x = f.c[0] * v.s + v.x, y = f.c[1] * v.s + v.y;
+    if (f.no) label(f.no, x, y, "bold 13px sans-serif", "#111");
+    else if (v.s > 1.8 && f.jb && (f.bb[2] - f.bb[0]) * v.s > 30) label(f.jb, x, y, "10px sans-serif", "#888");
+  }
+  if (me) {  // 現在地（青い点＋誤差の円）
+    const [x, y] = xy(me.lat, me.lon), sx = x * v.s + v.x, sy = y * v.s + v.y;
+    ctx.beginPath(); ctx.arc(sx, sy, Math.max(me.acc * v.s, 8), 0, 7); ctx.fillStyle = "rgba(26,115,232,.15)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(sx, sy, 7, 0, 7); ctx.fillStyle = "#1a73e8"; ctx.fill(); ctx.lineWidth = 2.5; ctx.strokeStyle = "#fff"; ctx.stroke();
+  }
+  // 縮尺
+  const m = [10, 20, 50, 100, 200, 500, 1000].find((d) => d * v.s > 60) || 1000;
+  ctx.fillStyle = "#333"; ctx.fillRect(12, 64, m * v.s, 3); ctx.font = "11px sans-serif"; ctx.textAlign = "left"; ctx.fillText(`${m}m`, 12, 56);
+}
+function label(s, x, y, font, color) { ctx.font = font; ctx.lineWidth = 3; ctx.strokeStyle = "#fff"; ctx.strokeText(s, x, y); ctx.fillStyle = color; ctx.fillText(s, x, y); }
+// 指1本で移動、2本で拡大縮小、軽くタップで管理番号のトークを開く
+const pts = new Map(); let tap = null, pinch = null;
+cv.addEventListener("pointerdown", (e) => {
+  cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+  tap = pts.size === 1 ? { x: e.offsetX, y: e.offsetY, t: Date.now() } : null;
+  if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), s: v.s, x: v.x, y: v.y, cx: (a[0] + b[0]) / 2, cy: (a[1] + b[1]) / 2 }; }
+});
+cv.addEventListener("pointermove", (e) => {
+  if (!pts.has(e.pointerId)) return;
+  const [px, py] = pts.get(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+  if (tap && Math.hypot(e.offsetX - tap.x, e.offsetY - tap.y) > 8) tap = null;
+  if (pts.size === 1 && !pinch) { v.x += e.offsetX - px; v.y += e.offsetY - py; }
+  else if (pts.size === 2 && pinch) {
+    const [a, b] = [...pts.values()], k = Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d, cx = (a[0] + b[0]) / 2, cy = (a[1] + b[1]) / 2;
+    v.s = pinch.s * k; v.x = cx - (pinch.cx - pinch.x) * k; v.y = cy - (pinch.cy - pinch.y) * k;
+  }
+  requestAnimationFrame(draw);
+});
+const up = (e) => {
+  pts.delete(e.pointerId); if (pts.size < 2) pinch = null;
+  if (tap && e.type === "pointerup" && Date.now() - tap.t < 500) {
+    const d = devicePixelRatio || 1;
+    const f = [...MF].reverse().find((f) => f.no && f._p && ctx.isPointInPath(f._p, tap.x * d, tap.y * d));
+    if (f) { sel = f.no; backToMap = true; openRoom(f.no); }
+  }
+  tap = null;
+};
+cv.addEventListener("pointerup", up); cv.addEventListener("pointercancel", up);
+cv.addEventListener("wheel", (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY / 500); v.x = e.offsetX - (e.offsetX - v.x) * k; v.y = e.offsetY - (e.offsetY - v.y) * k; v.s *= k; draw(); }, { passive: false });
+addEventListener("resize", () => { if ($("#map").classList.contains("on")) { size(); draw(); } });
+$("#mFit").onclick = () => { fit(allBB()); draw(); };
+$("#mGps").onclick = () => {
+  if (watch != null) { navigator.geolocation.clearWatch(watch); watch = null; me = null; $("#mGps").classList.remove("on"); draw(); return; }
+  if (!navigator.geolocation) { toast("位置が使えません"); return; }
+  $("#mGps").classList.add("on"); let first = true;
+  watch = navigator.geolocation.watchPosition((p) => {
+    me = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy };
+    if (first) { first = false; const [x, y] = xy(me.lat, me.lon); v.x = cv.clientWidth / 2 - x * v.s; v.y = cv.clientHeight / 2 - y * v.s; }
+    draw();
+  }, () => toast("位置が取れません"), { enableHighAccuracy: true, maximumAge: 5000 });
+};
+const stopGps = () => { if (watch != null) { navigator.geolocation.clearWatch(watch); watch = null; me = null; $("#mGps").classList.remove("on"); } };
+$("#back3").onclick = () => { stopGps(); sel = null; backToMap = false; show("home"); renderList(); };
+$("#toMap").onclick = () => { sel = null; openMap(); };
+$("#gmap").onclick = () => {
+  const W = cv.clientWidth, H = cv.clientHeight, x = (W / 2 - v.x) / v.s, y = (H / 2 - v.y) / v.s;
+  gmaps((MO.lat - y / 110950).toFixed(6), (MO.lon + x / MO.k).toFixed(6));
+};
+$("#gj").onchange = async (e) => {
+  const file = e.target.files[0]; e.target.value = ""; if (!file) return;
+  let fc; try { fc = JSON.parse(await file.text()); } catch (_) { toast("地図ファイル（.geojson）を選んでください"); return; }
+  if (!fc.features) { toast("地図ファイル（.geojson）を選んでください"); return; }
+  await put("maps", { name: file.name, fc });
+  MF = null; openMap.done = false;
+  toast(`地図を読み込みました（${fc.features.filter((f) => f.properties?.["管理番号"] != null).length}筆）`); mapList();
+};
+$("#mapClear").onclick = async () => { if (!confirm("読み込んだ地図を全部消しますか？（写真・メモは消えません）")) return; for (const m of await getAll("maps")) await del("maps", m.name); MF = null; mapList(); };
+async function mapList() { const ms = await getAll("maps"); $("#mapList").textContent = ms.length ? "読み込み済み：" + ms.map((m) => m.name).join("、") : "読み込み済み：なし"; }
+
 // ===== 設定 =====
-$("#toSet").onclick = () => { show("set"); usage(); };
+$("#toSet").onclick = () => { show("set"); usage(); mapList(); };
 $("#back2").onclick = () => { show("home"); renderList(); };
 $("#gps").checked = (() => { try { return localStorage.gps === "1"; } catch (e) { return false; } })();
 $("#gps").onchange = (e) => { try { localStorage.gps = e.target.checked ? "1" : "0"; } catch (_) {} if (e.target.checked) here(); };
